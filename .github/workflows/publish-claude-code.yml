@@ -1,0 +1,69 @@
+name: Publish Claude Code tarball to Releases
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 1.2.3). Leave blank for latest from npm."
+        required: false
+        default: ""
+  schedule:
+    # Optional: run every Monday at 09:00 UTC
+    - cron: "0 9 * * 1"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to create releases and upload assets
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Resolve version
+        id: resolve
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VER="${{ github.event.inputs.version }}"
+          else
+            VER="$(npm view @anthropic-ai/claude-code version)"
+          fi
+          echo "ver=$VER" >> $GITHUB_OUTPUT
+
+      - name: Pack npm tarball
+        run: |
+          npm pack @anthropic-ai/claude-code@${{ steps.resolve.outputs.ver }}
+          echo "Packed file(s):"
+          ls -1 *.tgz
+
+      - name: Generate checksums
+        run: |
+          for f in *.tgz; do
+            sha256sum "$f" > "$f.sha256"
+          done
+
+      - name: Create Git tag (if missing)
+        run: |
+          TAG="claude-code-v${{ steps.resolve.outputs.ver }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists."
+          else
+            git tag -a "$TAG" -m "Claude Code ${{ steps.resolve.outputs.ver }}"
+            git push origin "$TAG"
+          fi
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: claude-code-v${{ steps.resolve.outputs.ver }}
+          name: Claude Code v${{ steps.resolve.outputs.ver }}
+          draft: false
+          prerelease: false
+          files: |
+            *.tgz
+            *.tgz.sha256
